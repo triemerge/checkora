@@ -58,15 +58,14 @@ class ChessGame:
         """Flatten the 2-D board into a 64-char string for the C++ engine."""
         return ''.join(c if c else '.' for row in self.board for c in row)
 
-    def to_dict(self):
-        """Serialise state for Django session storage, including the DP cache."""
-        serializable_cache = {f"{r},{c}": v for (r, c), v in self.valid_moves_cache.items()}
+def to_dict(self):
+        """Serialise state for Django session storage. (Removed DP cache to fix 4KB limit)"""
         return {
             'board': self.board,
             'current_turn': self.current_turn,
             'move_history': self.move_history,
             'captured': self.captured,
-            'valid_moves_cache': serializable_cache,
+            # 'valid_moves_cache' ko cookie me save karna band kar diya
             'white_time': self.white_time,
             'black_time': self.black_time,
             'last_ts': self.last_ts,
@@ -76,7 +75,7 @@ class ChessGame:
 
     @classmethod
     def from_dict(cls, data):
-        """Restore a game and its DP cache from a session dictionary."""
+        """Restore a game from a session dictionary."""
         game = cls.__new__(cls)
         game.board = data['board']
         game.current_turn = data['current_turn']
@@ -88,11 +87,9 @@ class ChessGame:
         game.last_ts = data['last_ts']
         game.mode = data.get('mode', 'pvp')
 
-        cache_data = data.get('valid_moves_cache', {})
-        game.valid_moves_cache = {}
-        for k, v in cache_data.items():
-            r, c = map(int, k.split(','))
-            game.valid_moves_cache[(r, c)] = v
+        # Cache hamesha empty initialize hoga taaki C++ on-the-fly calculate kare
+        game.valid_moves_cache = {} 
+        
         return game
 
     # ------------------------------------------------------------------
