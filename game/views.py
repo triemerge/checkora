@@ -339,9 +339,9 @@ def get_state(request):
         else:
             game.update_clock()
 
+    _sanitize_move_history(game.move_history)
     request.session['game'] = game.to_dict()
     request.session.modified = True
-    _sanitize_move_history(game.move_history)
 
     return JsonResponse({
         'board': game.board,
