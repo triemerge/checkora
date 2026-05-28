@@ -22,9 +22,9 @@
             let turn = 'white';
             let selected = null;
             let hints = [];
-            let lastMove = null;
-            let premove = null;
-            let highlightedSquare = null;
+             let lastMove = null;
+             let premoveQueue = [];
+             let highlightedSquare = null;
 
             let dragging = false;
             let dragSrc = null;
@@ -340,6 +340,80 @@
                 return boardEl.children[vr * 8 + vc];
             };
 
+            function getVirtualBoard() {
+                let virtualBoard = board.map(row => [...row]);
+                for (const pm of premoveQueue) {
+                    const piece = virtualBoard[pm.from.r][pm.from.c];
+                    if (piece) {
+                        virtualBoard[pm.to.r][pm.to.c] = piece;
+                        virtualBoard[pm.from.r][pm.from.c] = null;
+                    }
+                }
+                return virtualBoard;
+            }
+
+            function drawPremoveArrows() {
+                let overlay = document.getElementById('premove-svg-overlay');
+                if (overlay) {
+                    overlay.remove();
+                }
+
+                if (premoveQueue.length === 0) return;
+
+                overlay = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                overlay.setAttribute('id', 'premove-svg-overlay');
+                overlay.style.cssText = 'position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:4;';
+
+                const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+                const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+                marker.setAttribute('id', 'premove-arrowhead');
+                marker.setAttribute('viewBox', '0 0 10 10');
+                marker.setAttribute('refX', '8');
+                marker.setAttribute('refY', '5');
+                marker.setAttribute('markerWidth', '6');
+                marker.setAttribute('markerHeight', '6');
+                marker.setAttribute('orient', 'auto-start-reverse');
+
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                path.setAttribute('d', 'M 0 1.5 L 10 5 L 0 8.5 z');
+                path.setAttribute('fill', '#3b82f6');
+                marker.appendChild(path);
+                defs.appendChild(marker);
+                overlay.appendChild(defs);
+
+                const boardRect = boardEl.getBoundingClientRect();
+                if (boardRect.width === 0 || boardRect.height === 0) {
+                    return;
+                }
+
+                premoveQueue.forEach(pm => {
+                    const fromSq = sq(pm.from.r, pm.from.c);
+                    const toSq = sq(pm.to.r, pm.to.c);
+                    if (!fromSq || !toSq) return;
+
+                    const fromRect = fromSq.getBoundingClientRect();
+                    const toRect = toSq.getBoundingClientRect();
+
+                    const x1 = (fromRect.left - boardRect.left) + fromRect.width / 2;
+                    const y1 = (fromRect.top - boardRect.top) + fromRect.height / 2;
+                    const x2 = (toRect.left - boardRect.left) + toRect.width / 2;
+                    const y2 = (toRect.top - boardRect.top) + toRect.height / 2;
+
+                    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                    line.setAttribute('x1', x1);
+                    line.setAttribute('y1', y1);
+                    line.setAttribute('x2', x2);
+                    line.setAttribute('y2', y2);
+                    line.setAttribute('stroke', '#3b82f6');
+                    line.setAttribute('stroke-width', '4');
+                    line.setAttribute('opacity', '0.75');
+                    line.setAttribute('marker-end', 'url(#premove-arrowhead)');
+                    overlay.appendChild(line);
+                });
+
+                boardEl.appendChild(overlay);
+            }
+
             function getSquareSize() {
                 const s = boardEl.querySelector('.square');
                 return s ? s.getBoundingClientRect().width : 60;
@@ -445,7 +519,7 @@
                 // Reset AI request sequence and thinking state on load/reconnect to cancel stale requests
                 aiRequestSeq = 0;
                 aiThinking = false;
-                premove = null;
+                premoveQueue = [];
                 refreshPremoveHighlight();
                 whiteAlertFired = false;
                 blackAlertFired = false;
@@ -604,7 +678,9 @@
                         // ADD THESE:
                         d.draggable = true;
                         d.ondragstart = e => {
-                            const piece = board[r][c];
+                            const isPremoveMode = gameMode === 'ai' && turn !== playerColor;
+                            const vBoard = isPremoveMode ? getVirtualBoard() : board;
+                            const piece = vBoard[r][c];
                             if (!piece) {
                                 if (blindfoldMode) {
                                     showStatus('No piece there', true);
@@ -737,10 +813,14 @@
                     el.classList.remove('premove');
                 });
 
-                if (!premove) return;
+                premoveQueue.forEach(pm => {
+                    const fromSq = sq(pm.from.r, pm.from.c);
+                    const toSq = sq(pm.to.r, pm.to.c);
+                    if (fromSq) fromSq.classList.add('premove');
+                    if (toSq) toSq.classList.add('premove');
+                });
 
-                sq(premove.from.r, premove.from.c).classList.add('premove');
-                sq(premove.to.r, premove.to.c).classList.add('premove');
+                drawPremoveArrows();
             }
 
             function highlightCheck() {
@@ -805,7 +885,9 @@
             SELECTION & MOVES
             ========================================================== */
             async function selectPiece(r, c) {
-                const p = board[r][c];
+                const isPremoveMode = gameMode === 'ai' && turn !== playerColor;
+                const vBoard = isPremoveMode ? getVirtualBoard() : board;
+                const p = vBoard[r][c];
 
                 if (!p || paused || gameOver) return;
 
@@ -895,7 +977,9 @@
             async function tryMove(fr, fc, tr, tc) {
                 if (paused || gameOver) return;
 
-                const p = board[fr][fc];
+                const isPremoveMode = gameMode === 'ai' && turn !== playerColor;
+                const vBoard = isPremoveMode ? getVirtualBoard() : board;
+                const p = vBoard[fr][fc];
                 if (!p) return;
 
                 // PREMOVE DURING AI TURN
@@ -904,10 +988,10 @@
                     pColor(p) === playerColor &&
                     turn !== playerColor
                 ) {
-                    premove = {
+                    premoveQueue.push({
                         from: { r: fr, c: fc },
                         to: { r: tr, c: tc }
-                    };
+                    });
 
                     refreshPremoveHighlight();
                     showStatus("Premove queued", false);
@@ -1030,6 +1114,10 @@
                         showStatus(data.message, true);
                         flashBoard();
                         deselect();
+                        if (premoveQueue.length > 0) {
+                            premoveQueue = [];
+                            refreshPremoveHighlight();
+                        }
                     }
                 } catch (e) {
                         await handleReconnect();
@@ -1124,9 +1212,8 @@
                             if (a11yMsg) announceMove(a11yMsg);
 
                             // Trigger queued premove if it exists
-                            if (premove) {
-                                const queued = premove;
-                                premove = null;
+                            if (premoveQueue.length > 0) {
+                                const queued = premoveQueue.shift();
                                 refreshPremoveHighlight();
 
                                 const piece = board[queued.from.r][queued.from.c];
@@ -1135,6 +1222,8 @@
                                         tryMove(queued.from.r, queued.from.c, queued.to.r, queued.to.c);
                                     }, 150);
                                 } else {
+                                    premoveQueue = [];
+                                    refreshPremoveHighlight();
                                     showStatus("Premove cancelled: piece captured or invalid", true);
                                 }
                             }
@@ -1159,7 +1248,9 @@
                 if (replayMode) return;
                 if (dragging) return;
 
-                const piece = board[r][c];
+                const isPremoveMode = gameMode === 'ai' && turn !== playerColor;
+                const vBoard = isPremoveMode ? getVirtualBoard() : board;
+                const piece = vBoard[r][c];
 
                 const aiPremoveMode =
                     gameMode === 'ai' &&
@@ -1175,10 +1266,10 @@
                     // PREMOVE CLICK
                     if (aiPremoveMode) {
 
-                        premove = {
+                        premoveQueue.push({
                             from: { r: selected.r, c: selected.c },
                             to: { r, c }
-                        };
+                        });
 
                         refreshPremoveHighlight();
 
@@ -1221,7 +1312,9 @@
 
             function onDragStart(e, r, c) {
 
-                const piece = board[r][c];
+                const isPremoveMode = gameMode === 'ai' && turn !== playerColor;
+                const vBoard = isPremoveMode ? getVirtualBoard() : board;
+                const piece = vBoard[r][c];
                 if (!piece) {
                     if (blindfoldMode) {
                         showStatus('No piece there', true);
@@ -2245,7 +2338,7 @@
                 // Reset AI request sequence and thinking state on new game
                 aiRequestSeq = 0;
                 aiThinking = false;
-                premove = null;
+                premoveQueue = [];
                 refreshPremoveHighlight();
 
                 clearTimeout(pgnDownloadTimeout);
@@ -3242,7 +3335,7 @@ if (leaveConfirmNo) leaveConfirmNo.addEventListener('click', () => {
             boardEl.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
 
-                premove = null;
+                premoveQueue = [];
                 refreshPremoveHighlight();
                 showStatus("Premove cancelled", false);
             });
@@ -3255,7 +3348,9 @@ if (leaveConfirmNo) leaveConfirmNo.addEventListener('click', () => {
 
                 const r = parseInt(squareEl.dataset.r);
                 const c = parseInt(squareEl.dataset.c);
-                const piece = board[r][c];
+                const isPremoveMode = gameMode === 'ai' && turn !== playerColor;
+                const vBoard = isPremoveMode ? getVirtualBoard() : board;
+                const piece = vBoard[r][c];
                 if (!piece || paused || gameOver) return;
 
                 // Check if the piece is playable by the current player (including AI premoves)
@@ -3506,6 +3601,12 @@ if (leaveConfirmNo) leaveConfirmNo.addEventListener('click', () => {
                 if (confirmOverlay.classList.contains('active')) return;
                 if (gameOverOverlay.classList.contains('active')) return;
                 await resumeGame();
+            });
+
+            window.addEventListener('resize', () => {
+                if (premoveQueue.length > 0) {
+                    drawPremoveArrows();
+                }
             });
 
 })();
