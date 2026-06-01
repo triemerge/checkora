@@ -1257,8 +1257,8 @@ body {
 
 .theme-btn.active {
     border-color: #f0c040;
-    box-shadow: 0 0 0 3px #f0c040, 0 0 8px rgba(240, 192, 64, 0.5);
-    transform: scale(1.25);
+    box-shadow: 0 0 6px rgba(240, 192, 64, 0.35);
+    transform: scale(1.1);
     opacity: 1;
 }
 
